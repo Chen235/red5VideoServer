@@ -1,0 +1,419 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" creationComplete="init();" width="340" height="320">
+	<mx:Style>
+		Alert{font-size:12px;}
+	</mx:Style>
+	<mx:Script>
+		<![CDATA[
+		import mx.controls.Alert;
+		import mx.core.Application;
+		import mx.core.FlexGlobals;
+		import mx.events.CloseEvent;
+		import mx.events.SliderEvent;
+		import mx.events.VideoEvent;
+		import mx.rpc.events.FaultEvent;
+		import mx.rpc.events.ResultEvent;
+		import mx.rpc.http.HTTPService;
+
+		private var str:String;
+		private var videoPro:Video;
+		private var camera:Camera;
+		private var inNs:NetStream;
+		private var outNs:NetStream;
+		private var nc:NetConnection;
+		private var m_pictureBitmapData:BitmapData //定义视频截图
+		private static const DEFAULT_CAMERA_WIDTH:Number = 320; //摄像头显示宽度
+		private static const DEFAULT_CAMERA_HEIGHT:Number = 240; //摄像头显示高度
+		[Bindable]
+		private var m_pictureData:String;
+
+		private var lastvideodeoName:String = "";   //视频录制后保存的名字
+		private var _videoSaveActionUrl:String = ""; //保存视频的服务接口
+		private var index:int = 0; //系统标识，0标识没有连接视频服务，1标识已连接视频服务
+
+		private var videoDomainNameDefault:String = "video.eloancn.com";//默认的视频域名
+		private var videoDomainName:String;//可用的视频域名(从服务端获取)
+		private var rtmp:String = "rtmp://";//视频服务协议头
+		private var videoAuth:String = "/videoAuth";//视频服务名字
+
+		private var serverDomainName:String;//服务端域名
+		private var serverForGetVideoDomainName:String;//获取视频域名的服务接口
+		private var serverForExceptVideoServer:String;//视频服务异常通知并重新获取服务接口
+		private var serverForStopVideoServer:String;//断开视频服务接口
+		//			private var type:String; //服务类型  0获取可用域名  1可用域名释放  2连接失败报警，并重新获取可用域名
+		private var serverIndex:String;//系统服务标识，用于标识某次连接是否有效或者过期等
+		private var doMainNameContectFlag:int = 0;
+
+		public function init():void{
+			setupcameraera();    //初始化摄像头信息
+			var parameters:Object = FlexGlobals.topLevelApplication.parameters;
+
+			serverDomainName = parameters.serverDomainName;
+			serverForGetVideoDomainName = parameters.serverForGetVideoDomainName;
+			serverForExceptVideoServer = parameters.serverForExceptVideoServer;
+			serverForStopVideoServer = parameters.serverForStopVideoServer;
+
+			//验证参数
+			if(serverDomainName==null || serverDomainName == ''
+					|| serverForGetVideoDomainName == null || serverForGetVideoDomainName == ''
+					|| serverForExceptVideoServer == null || serverForExceptVideoServer == ''
+					|| serverForStopVideoServer == null || serverForStopVideoServer == ''){
+
+				Alert.show("系统参数有误，请联系我们！");
+				startRec.enabled = false;
+			}
+			_videoSaveActionUrl = parameters.videoSaveActionUrl;
+			t_ws_SaveVideo.url=serverDomainName+_videoSaveActionUrl;
+		}
+
+		//初始化摄像头信息
+		public function setupcameraera():void{
+			//启动摄像头
+			camera = Camera.getCamera();
+			if(camera != null){
+				camera.addEventListener(StatusEvent.STATUS,onStatusHandler);
+				camera.setMode(DEFAULT_CAMERA_WIDTH,DEFAULT_CAMERA_HEIGHT,30);
+				camera.setQuality(0,85);  //设置清晰度
+				videoPro = new Video();
+				videoPro.width = 320;
+				videoPro.height = 240;
+				videoPro.attachCamera(camera);
+				t_vd_Video.addChild(videoPro);
+			}else{
+				Alert.show("错误：无法链接到活动摄像头！");
+				startRec.enabled = false;
+			}
+		}
+
+		//摄像头使用监控事件
+		public function onStatusHandler(event:StatusEvent):void{
+			//判断摄像头存不存在
+			if(!camera.muted){
+				startRec.enabled = true;
+			}else{
+				Alert.show("您拒绝使用摄像头，无法使用拍照功能。","提示：",Alert.OK);
+				startRec.enabled = false;
+			}
+			camera.removeEventListener(StatusEvent.STATUS,onStatusHandler);
+		}
+
+		//录制视频
+		public function clickConnect(evt:MouseEvent):void{
+
+			if(doMainNameContectFlag==1){
+				Alert.show("正在建立视频录制链接，请稍等！","提示",Alert.OK);
+				return;
+			}
+
+			//获取可用的视频域名
+			var vars:URLVariables = new URLVariables();
+			vars.type = 0;
+			var request:URLRequest = new URLRequest();
+			request.url = serverDomainName+serverForGetVideoDomainName;
+			request.method = URLRequestMethod.POST;
+			request.data = vars;
+
+			var loader:URLLoader = new URLLoader();
+			loader.load(request);
+			doMainNameContectFlag = 1;
+			//正确返回时，解析返回的数据
+			loader.addEventListener(Event.COMPLETE,function(e:Event):String{
+				var loader:URLLoader = e.target as URLLoader;
+				var o:* = JSON.parse(loader.data);
+
+				//返回的tip为空时，表示有可用的视频服务域名
+				var tip:String = o.tip;
+				if(tip == null || tip == ''){
+					var vdn:String = o.videoDoMainName;
+					if(vdn==null || vdn==''){
+						//分配默认域名
+						videoDomainName = videoDomainNameDefault;
+					}else{
+						//系统标识置为1，已分配视频服务
+						index = 1;
+						//分配的视频服务域名
+						videoDomainName = vdn;
+						//系统标识
+						serverIndex = o.serverIndex;
+					}
+
+					//连接red5服务器
+					nc = new NetConnection();
+					nc.addEventListener(NetStatusEvent.NET_STATUS,nsHandler);
+					nc.connect(rtmp+videoDomainName+videoAuth);
+				}
+				//返回不为空时，则系统程序有问题，给予用户提示
+				else{
+					Alert.show(tip);
+				}
+				return null;
+			});
+
+			//连接服务失败时，直接连接默认视频服务
+			loader.addEventListener(IOErrorEvent.IO_ERROR,function (e:IOErrorEvent):void{
+				//分配默认域名
+				videoDomainName = videoDomainNameDefault;
+
+				//连接red5服务器
+				nc = new NetConnection();
+				nc.addEventListener(NetStatusEvent.NET_STATUS,nsHandler);
+				nc.connect(rtmp+videoDomainName+videoAuth);
+			});
+
+		}
+
+
+		public function nsHandler(evt:NetStatusEvent):void{
+
+			//如果连接成功
+			if (evt.info.code == "NetConnection.Connect.Success"){
+				//开始录制视频
+				playClick();
+			}
+			//连接失败
+			else{
+				//调用服务，通知技术人员服务连接失败，并重新分配一个域名
+				var vars:URLVariables = new URLVariables();
+				vars.type = 2;
+				vars.videoDoMainName = videoDomainName;
+				vars.serverIndex = serverIndex;
+				var request:URLRequest = new URLRequest();
+				request.url = serverDomainName+serverForExceptVideoServer;
+				request.method = URLRequestMethod.POST;
+				request.data = vars;
+				var loader:URLLoader = new URLLoader();
+				loader.load(request);
+
+				loader.addEventListener(Event.COMPLETE,function(e:Event):String{
+					var loader:URLLoader = e.target as URLLoader;
+					var o:* = JSON.parse(loader.data);
+
+					//返回的tip为空时，表示有可用的视频服务域名
+					var tip:String = o.tip;
+					if(tip == null || tip == ''){
+						var vdn:String = o.videoDoMainName;
+						if(vdn==null || vdn==''){
+							//分配默认域名
+							videoDomainName = videoDomainNameDefault;
+						}else{
+							//系统标识置为1，已分配视频服务
+							index = 1;
+							//系统分配的视频域名
+							videoDomainName = vdn;
+							//系统标识
+							serverIndex = o.serverIndex;
+						}
+
+						//第二次连接red5服务器
+						nc = new NetConnection();
+						nc.addEventListener(NetStatusEvent.NET_STATUS,nsHandler2);
+						nc.connect(rtmp+videoDomainName+videoAuth);
+					}
+					//返回不为空时，则系统程序有问题，给予用户提示
+					else{
+						Alert.show(tip);
+					}
+					return null;
+				});
+			}
+		}
+
+		//第二次连接服务
+		public function nsHandler2(evt:NetStatusEvent):void{
+			//如果连接成功
+			if (evt.info.code == "NetConnection.Connect.Success"){
+				//开始录制视频
+				playClick();
+			}
+			//连接失败
+			else{
+				doMainNameContectFlag = 0;
+				Alert.show("连接失败");
+			}
+		}
+
+		public function playClick():void{
+			doMainNameContectFlag = 0;
+			if(videoPro != null){
+				videoPro.clear();
+				t_vd_Video.removeChild(videoPro);
+			}
+			videoPro = new Video();
+			videoPro.width = 320;
+			videoPro.height = 240;
+			videoPro.attachCamera(camera);
+			t_vd_Video.addChild(videoPro);
+			outNs = new NetStream(nc);
+			outNs.attachCamera(camera);   //把摄像头存入outNs
+			outNs.attachAudio(Microphone.getMicrophone());
+			//outNs.attachAudio(mic);     //把麦克风存入outNs
+			lastvideodeoName = "REPLAY" + Math.random();
+			outNs.publish(lastvideodeoName, "record");
+			startRec.enabled = false;
+			stopRec.enabled = true;
+			playVod.enabled = false;
+			submit.enabled = false;
+		}
+
+		public function stopClick(evt:MouseEvent):void{
+			//关闭ns与red5的连接
+			if(outNs != null){
+				outNs.close();
+			}
+
+			if(inNs != null){
+				inNs.close();
+			}
+
+			videoPro.clear();
+			t_vd_Video.removeChild(videoPro);
+			videoPro = null;
+
+			//锁定开始按键使其生效
+			startRec.enabled = true;
+
+			//锁定停止按键使其失效
+			stopRec.enabled = false;
+			playVod.enabled = true;
+			submit.enabled = true;
+
+			//若已连接视频服务，则通知系统将正在使用的视频服务数量 -1
+			if(index == 1){
+				var vars:URLVariables = new URLVariables();
+				vars.type = 1;
+				vars.videoDoMainName = videoDomainName;
+				vars.serverIndex = serverIndex;
+				var request:URLRequest = new URLRequest();
+				request.url = serverDomainName+serverForStopVideoServer;
+				request.method = URLRequestMethod.POST;
+				request.data = vars;
+
+				var loader:URLLoader = new URLLoader();
+				loader.load(request);
+				index = 0;
+			}
+		}
+
+		private function playLastvideo(evt:MouseEvent):void{
+			if(nc!=null){
+				//addEventListener(Event.ENTER_FRAME,onEnterFrame);
+				inNs = new NetStream(nc);
+				var clientobj:Object=new Object();
+				clientobj.onMetaData=function():void{};
+				clientobj.onPlayStatus=doComplete;
+				inNs.client=clientobj;
+
+				//删除原_localvideodeo，便于在录制和播放视频之间切换
+				videoPro = new Video();
+				videoPro.width = 320;
+				videoPro.height = 240;
+				videoPro.attachNetStream(inNs);
+				t_vd_Video.addChild(videoPro);
+				inNs.play(lastvideodeoName+".flv");
+			}
+			startRec.enabled = false;
+			stopRec.enabled = true;
+			playVod.enabled = false;
+			submit.enabled = false;
+		}
+		private function submitVideo(evt:MouseEvent):void{
+			Alert.show("确认保存视频。","提示：",Alert.OK|Alert.NO,this,function(evtIn:CloseEvent):void{
+				if(evtIn.detail == Alert.OK)
+				{
+					var params:URLVariables = new URLVariables();
+					params.videoFileName = lastvideodeoName;
+					params.videoDoMainName = videoDomainName;
+					t_ws_SaveVideo.send(params);
+				}
+			});
+		}
+		private function doComplete(evt:Object):void{
+			startRec.enabled = true;
+			stopRec.enabled = false;
+			playVod.enabled = true;
+			submit.enabled = true;
+		}
+
+		//WebService保存图片成功事件
+		private function onSaveVideoResult(event:ResultEvent):void
+		{
+			var json:Object = new Object();
+			if(event.result != null && event.result.toString() != null){
+				json = JSON.parse(event.result.toString());
+			}
+
+			if(json.tip == null)
+			{
+				Alert.show("保存成功,请等待审核!","提示",Alert.OK);
+				camera = Camera.getCamera(null);
+				camera = null;
+				if(videoPro != null)
+					videoPro.attachCamera(null);
+				startRec.enabled = false;
+				stopRec.enabled = false;
+				playVod.enabled = false;
+				submit.enabled = false;
+			}
+			else
+			{
+				Alert.show(json.tip,"提示",Alert.OK);
+			}
+		}
+
+		//连接WebService失败事件
+		public function onSaveVideoFault(event:FaultEvent):void
+		{
+			//Alert.show(event.fault.toString(),"提示",Alert.OK);
+			Alert.show("连接服务器失败。","提示",Alert.OK);
+		}
+
+		//保存图片成功后的弹出窗口确认事件
+		private function onAlertCloseHandler(event:CloseEvent):void
+		{
+			if(event.detail == Alert.YES)
+			{
+				ExternalInterface.call("saveVideoSuccess");
+			}
+		}
+
+		//保存按钮事件，保存视频截图
+		//通过WebService保存
+		private function SaveVideo():void
+		{
+			m_pictureData = "";
+			for(var i:int = 0; i < DEFAULT_CAMERA_WIDTH; i++)
+			{
+				for(var j:int = 0; j < DEFAULT_CAMERA_HEIGHT; j++)
+				{
+					if(m_pictureData.length > 0)
+					{
+						m_pictureData += "," + m_pictureBitmapData.getPixel32(i,j).toString();
+					}
+					else
+					{
+						m_pictureData = m_pictureBitmapData.getPixel32(i,j).toString();
+					}
+				}
+			}
+
+			var params:URLVariables = new URLVariables();
+			params.width = DEFAULT_CAMERA_WIDTH;
+			params.height = DEFAULT_CAMERA_HEIGHT;
+			params.bitmap_data = m_pictureData;
+			t_ws_SaveVideo.send(params);
+		}
+
+		]]>
+	</mx:Script>
+	
+	<mx:HTTPService url="" id="t_ws_SaveVideo" resultFormat="text" showBusyCursor="true" method="POST" useProxy="false" result="onSaveVideoResult(event)" fault="onSaveVideoFault(event)"/>
+	<mx:Panel cornerRadius="1" width="340" height="320" layout="absolute" borderAlpha="1">
+		<mx:VideoDisplay id="t_vd_Video" width="320" height="240"/>
+		<mx:ControlBar horizontalAlign="center">
+			<mx:Button id="startRec" label="开始录制" click="this.clickConnect(event);" enabled="true" />   
+			<mx:Button id="stopRec" label="停止录制" click="this.stopClick(event);" enabled="false" />   
+			<mx:Button id="playVod" label="播放" click="this.playLastvideo(event);" enabled="false" />
+			<mx:Button id="submit" label="提交" click="this.submitVideo(event);" enabled="false" />
+		</mx:ControlBar>
+	</mx:Panel>
+</mx:Application>

@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mx:Application xmlns:mx="http://www.adobe.com/2006/mxml" layout="absolute" backgroundGradientColors="#000000" backgroundColor="#ffffff" width="360" height="330" creationComplete="initApp()">
+    <mx:Style>
+        Alert{font-size:12px;}
+    </mx:Style>
+    <mx:Script>
+        <![CDATA[
+            import mx.events.CloseEvent;
+            import mx.rpc.events.FaultEvent;
+            import mx.rpc.events.ResultEvent;
+            import mx.controls.Alert;
+            import mx.core.Application;
+            //icon="@Embed(source='images/button82.jpg')"
+            private static const DEFAULT_CAMERA_WIDTH:Number = 320; //摄像头显示宽度
+            private static const DEFAULT_CAMERA_HEIGHT:Number = 240; //摄像头显示高度
+            private var DEFAULT_WEBSERVICE_URL:String = ""; //WebService地址
+            private var str:String;
+            private var signcode:String;
+            private var m_camera:Camera; //定义一个摄像头
+            private var m_localVideo:Video; //定义一个本地视频
+            private var m_pictureBitmapData:BitmapData //定义视频截图
+            [Bindable]
+            private var m_pictureData:String;
+
+            private function initApp():void{
+            	//Security.loadPolicyFile("http://192.168.1.97:8080/dkweb/cossdomin.xml");
+                t_btn_Shooting.enabled = true;
+                t_ban_Save.enabled = false;
+                initCamera();
+                
+                var parameters:Object = Application.application.parameters;
+				//Alert.show(parameters.webContent);
+				DEFAULT_WEBSERVICE_URL = parameters.webContent;
+				signcode = parameters.signcode;
+				//Alert.show(DEFAULT_WEBSERVICE_URL);
+				//Alert.show(Application.application.url);
+            }
+            
+            //初始化摄像头
+            private function initCamera():void
+            {
+                m_camera = Camera.getCamera();
+                if(m_camera != null)
+                {
+                    m_camera = Camera.getCamera();
+                    m_camera.addEventListener(StatusEvent.STATUS,__onCameraStatusHandler);
+                    m_camera.setMode(DEFAULT_CAMERA_WIDTH,DEFAULT_CAMERA_HEIGHT,30);
+                    m_localVideo = new Video();
+                    m_localVideo.width = DEFAULT_CAMERA_WIDTH;
+                    m_localVideo.height = DEFAULT_CAMERA_HEIGHT;
+                    m_localVideo.attachCamera(m_camera);
+                    t_vd_Video.addChild(m_localVideo);
+                }
+                else
+                {
+                    Alert.show("没有找到摄像头，是否重新查找。","提示：",Alert.OK|Alert.NO,this,__InitCamera);
+                    return;
+                }
+            }
+            
+            //拍照按钮事件，进行视频截图
+            private function SnapshotPicture():void
+            {
+            	if(m_camera.muted){
+            		flash.system.Security.showSettings(SecurityPanel.PRIVACY);
+            		return ;
+            	}
+                m_pictureBitmapData = new BitmapData(DEFAULT_CAMERA_WIDTH,DEFAULT_CAMERA_HEIGHT);
+                m_pictureBitmapData.draw(t_vd_Video,new Matrix());
+                
+                var m_pictureBitmap:Bitmap = new Bitmap(m_pictureBitmapData);
+                t_img_Picture.addChild(m_pictureBitmap);
+                
+                t_panel_Picture.visible = true;
+                t_ban_Save.enabled = true;
+            }
+            
+            //保存按钮事件，保存视频截图
+            //通过WebService保存
+            private function SavePicture(event:MouseEvent):void
+            {
+                m_pictureData = "";
+                for(var i:int = 0; i < DEFAULT_CAMERA_WIDTH; i++)
+                {
+                    for(var j:int = 0; j < DEFAULT_CAMERA_HEIGHT; j++)
+                    {
+                        if(m_pictureData.length > 0)
+                        {
+                            m_pictureData += "," + m_pictureBitmapData.getPixel32(i,j).toString();
+                        }
+                        else
+                        {
+                            m_pictureData = m_pictureBitmapData.getPixel32(i,j).toString();
+                        }
+                    }
+                }
+                
+                var params:URLVariables = new URLVariables();
+                params.width = DEFAULT_CAMERA_WIDTH;
+                params.height = DEFAULT_CAMERA_HEIGHT;
+                params.bitmap_data = m_pictureData;
+                params.type = 2;
+                params.signcode = signcode;
+                //Alert.show(t_ws_SavePicture.url + "|" + DEFAULT_WEBSERVICE_URL);
+                t_ws_SavePicture.url = DEFAULT_WEBSERVICE_URL;
+                //Alert.show(t_ws_SavePicture.url);
+                t_ws_SavePicture.send(params);
+
+            }
+            
+            //检测摄像头权限事件
+            private function __onCameraStatusHandler(event:StatusEvent):void
+            {
+                if(!m_camera.muted)
+                {
+                    t_btn_Shooting.enabled = true;
+                }
+                else
+                {
+                    Alert.show("您拒绝使用摄像头，无法使用拍照功能。","提示：",Alert.OK);
+                    // t_btn_Shooting.enabled = false;
+                }
+                m_camera.removeEventListener(StatusEvent.STATUS,__onCameraStatusHandler);
+            }
+            
+            //当摄像头不存在，或连接不正常时重新获取
+            private function __InitCamera(event:CloseEvent):void
+            {
+                if(event.detail == Alert.OK)
+                {
+                    initApp();
+                }else{
+                	t_btn_Shooting.enabled = false;
+                	// 跳转回前一页
+                	ExternalInterface.call("doChangedParent");
+                }
+            }
+            
+            //WebService保存图片成功事件
+            private function __onSavePictureResult(event:ResultEvent):void
+            {
+                //trace(event.result);
+                if(event.result.toString() != "保存失败" || event.result.toString().indexOf("session out"))
+                {
+                    str = event.result.toString();
+//                  Alert.show(event.result.toString(),"提示",3,this,__onAlertCloseHandler);
+					ExternalInterface.call("doSubmitParent",event.result.toString());
+					Alert.show("更改成功","提示",Alert.OK,this,doChanged);
+					//Alert.show("aaa","aaa","aa",aa,);
+                }
+                else
+                {
+                    Alert.show(event.result.toString(),"提示",Alert.OK);
+                }
+            }
+            private function doChanged(event:CloseEvent):void
+            {
+            	// Alert.show("doChanged");
+            	ExternalInterface.call("doChangedParent");
+            }
+            
+            //连接WebService失败事件
+            private function __onSavePictureFault(event:FaultEvent):void
+            {
+                Alert.show(event.fault.toString(),"提示",Alert.OK);
+                Alert.show("连接服务器失败。","提示",Alert.OK);
+            }
+            private function CanelPicture():void
+            {
+                t_panel_Picture.visible = false;
+            }
+//            //保存图片成功后的弹出窗口确认事件
+//            private function __onAlertCloseHandler(event:CloseEvent):void
+//            {
+//                if(event.detail == Alert.YES)
+//                {
+//                    ExternalInterface.call("setValueToField",str);
+//                }
+//            }
+        ]]>
+    </mx:Script>
+    <mx:HTTPService id="t_ws_SavePicture" resultFormat="text" showBusyCursor="true" method="POST" useProxy="false" result="__onSavePictureResult(event)" fault="__onSavePictureFault(event)"/>
+    
+    <mx:Panel cornerRadius="1" dropShadowEnabled="false" borderColor="#ffffff" borderAlpha="1" width="340" height="320" layout="absolute" >
+        <mx:VideoDisplay id="t_vd_Video" width="320" height="240" />
+        <mx:ControlBar horizontalAlign="center">
+            <mx:Button id="t_btn_Shooting" label="拍照" click="SnapshotPicture()" width="70"/>
+        </mx:ControlBar>
+    </mx:Panel>
+    
+    <mx:Panel cornerRadius="1" id="t_panel_Picture" borderColor="#ffffff" dropShadowEnabled="false" width="340" height="320" borderAlpha="1" layout="absolute" visible="false">
+        <mx:Image id="t_img_Picture"  width="320" height="240"/>
+        <mx:ControlBar   horizontalAlign="center">
+            <mx:Button id="t_ban_Save"  label="更换" click="SavePicture(event)" />
+            <mx:Button id="t_ban_Canel"  label="重拍" click="CanelPicture()" />
+        </mx:ControlBar>
+    </mx:Panel>
+</mx:Application>

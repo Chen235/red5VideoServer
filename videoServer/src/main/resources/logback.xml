@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<configuration>
+	<!-- 声明变量 -->
+	<property name="log.base" value="/data/logs/video/" />
+	
+	<appender name="STDOUT"	class="ch.qos.logback.core.ConsoleAppender">
+	<layout class="ch.qos.logback.classic.PatternLayout">
+	   <pattern>%-4relative [%thread] %-5level %class - %msg%n</pattern>
+	</layout>
+	</appender>
+	
+	<!-- 按照每天生成日志文件 -->
+	<appender name="VIDEO"
+		class="ch.qos.logback.core.rolling.RollingFileAppender">
+		<Encoding>UTF-8</Encoding>
+		<rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+			<FileNamePattern>${log.base}/video.%d{yyyy-MM-dd}.log</FileNamePattern>
+			<MaxHistory>30</MaxHistory>
+		</rollingPolicy>
+		<layout class="ch.qos.logback.classic.PatternLayout">
+			<pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{50} - %msg%n
+			</pattern>
+		</layout>
+	</appender>
+	
+	<logger name="com.video.*" level="info" additivity="false">
+		<appender-ref ref="VIDEO" />
+		<appender-ref ref="STDOUT"/>
+	</logger>
+
+	<root level="info">
+		<appender-ref ref="STDOUT" />
+		<appender-ref ref="FILE" />
+	</root>
+	
+</configuration>

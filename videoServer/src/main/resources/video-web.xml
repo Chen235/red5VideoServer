@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:lang="http://www.springframework.org/schema/lang"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-2.5.xsd
+                           http://www.springframework.org/schema/lang http://www.springframework.org/schema/lang/spring-lang-2.5.xsd">
+
+	<!-- oflaDemo web context -->
+	<bean id="web.context.videoAuth" class="org.red5.server.Context">
+		<property name="scopeResolver" ref="red5.scopeResolver" />
+		<property name="clientRegistry" ref="global.clientRegistry" />
+		<property name="serviceInvoker" ref="global.serviceInvoker" />
+		<property name="mappingStrategy" ref="global.mappingStrategy" />
+	</bean>
+
+	<bean id="web.scope.videoAuth" class="org.red5.server.WebScope"
+		init-method="register">
+		<property name="server" ref="red5.server" />
+		<property name="parent" ref="global.scope" />
+		<property name="context" ref="web.context.videoAuth" />
+		<property name="handler" ref="web.handler.videoAuth" />
+		<property name="contextPath" value="/videoAuth" />
+		<property name="virtualHosts" value="*" />
+	</bean>
+
+	<bean id="web.handler.videoAuth" class="com.video.red5.Application" />
+	<bean id="streamFilenameGenerator" class="com.video.red5.VideoSavePath">
+		<!-- 后台认证播放路径 -->
+		<property name="backAuthBackplayPath" value="/upload/video"></property>
+		<!-- 前台认证录相路径 -->
+		<property name="frontAuthRecordPath" value="/streams"></property>
+		<!-- 前台认证播放路径 -->
+		<property name="frontAuthBackplayPath" value="/streams"></property>
+		<!-- 是否绝对路径 -->
+		<property name="absolutePath" value="false"></property>
+		<!-- 后台RED应用名称 -->
+		<property name="backAuthScope" value="backVideoAuth"></property>
+		<!-- 前台RED应用名称 -->
+		<property name="frontAuthScope" value="videoAuth"></property>
+
+	</bean>
+</beans>

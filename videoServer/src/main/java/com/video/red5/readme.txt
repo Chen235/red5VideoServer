@@ -1,0 +1,3 @@
+as3corelib.swc文件是额外的包，用作flex中处理Json串
+video.mxml是视频认证的flex源文件
+photo.mxml是头像拍照的flex源文件
